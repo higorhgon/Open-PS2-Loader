@@ -18,6 +18,9 @@ void mmceInit(item_list_t *itemList);
 item_list_t *mmceGetObject(int initOnly);
 void mmceLoadModules(void);
 void mmceLaunchGame(item_list_t *itemList, int id, config_set_t *configSet);
+// Autolaunch (argv "mmce" mode): selects the slot holding the ISO, returns 0 when found
+int mmceAutoLaunchSetup(int slot, const char *media, const char *fileName);
+const char *mmceAutoLaunchPrefix(void);
 // Push the selected game's disc id to a present MMCE card (SD2PSX/MemCard PRO2) for per-game folder
 // switching. Self-probes mmce0:/mmce1: when no MMCE-tab prefix is set, so it works on ALL launch
 // paths (USB/HDD/SMB), not just the MMCE tab. No-ops if the feature is off or no card answers (#261).

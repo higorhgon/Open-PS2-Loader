@@ -391,6 +391,45 @@ int mmceDetectSlot(void)
     return ret;
 }
 
+// Autolaunch (argv "mmce" mode): selects the MMCE slot holding <prefix><media>/<fileName>.
+// slot is 0 or 1, or -1 to try both. Pins gMMCESlot so the loader's MMCEDRV port matches.
+// Returns 0 when the ISO was found.
+int mmceAutoLaunchSetup(int slot, const char *media, const char *fileName)
+{
+    char path[256];
+    int first = (slot == 1) ? 1 : 0;
+    int last = (slot == 0) ? 0 : 1;
+
+    // The card may still be settling right after mmceLoadModules()
+    for (int attempt = 0; attempt < 10; attempt++) {
+        for (int s = first; s <= last; s++) {
+            snprintf(mmcePrefix, sizeof(mmcePrefix), "mmce%d:/%s", s, gMMCEPrefix);
+            int len = strlen(mmcePrefix);
+            if (len < (int)sizeof(mmcePrefix) - 1 && mmcePrefix[len - 1] != '/') {
+                mmcePrefix[len] = '/';
+                mmcePrefix[len + 1] = '\0';
+            }
+
+            snprintf(path, sizeof(path), "%s%s/%s", mmcePrefix, media, fileName);
+            int fd = fileXioOpen(path, 0x1, 0666);
+            if (fd >= 0) {
+                fileXioClose(fd);
+                gMMCESlot = s;
+                return 0;
+            }
+        }
+        DelayThread(200 * 1000);
+    }
+
+    mmcePrefix[0] = '\0';
+    return -1;
+}
+
+const char *mmceAutoLaunchPrefix(void)
+{
+    return mmcePrefix;
+}
+
 void mmceSetPrefix(void)
 {
     if (gMMCESlot == 0)
@@ -934,7 +973,7 @@ void mmceLaunchGame(item_list_t *itemList, int id, config_set_t *configSet)
     u32 layer1_start, layer1_offset;
     unsigned short int layer1_part;
 
-    // No Autolaunch yet
+    // Autolaunch (argv "mmce" mode, see autoLaunchMMCEGame) reuses gAutoLaunchBDMGame and passes itemList == NULL
     if (gAutoLaunchBDMGame == NULL) {
         game = mmceActiveGame(itemList, id);
         if (game == &mmceEmptyGame)
@@ -946,7 +985,8 @@ void mmceLaunchGame(item_list_t *itemList, int id, config_set_t *configSet)
     // and pin the path composers to the current subfolder so a nested game resolves.
     if (game != NULL && game->format == GAME_FORMAT_FOLDER)
         return;
-    sbSetBrowseSub(folderGetSub(itemList->mode));
+    // Autolaunch has no item list and always launches from the CD/DVD root.
+    sbSetBrowseSub(itemList != NULL ? folderGetSub(itemList->mode) : "");
 
     // Quiesce every in-flight MMCE art read BEFORE either launch path touches the card. The VCD
     // handoff below resolves POPSTARTER and may equip BDMA modules -- real reads/writes on the SAME
@@ -1226,8 +1266,15 @@ void mmceLaunchGame(item_list_t *itemList, int id, config_set_t *configSet)
         // IOP reset -- keep BOTH mounted. An MC-hosted neutrino needs no exception (-1 second slot).
         if (sysNeutrinoPreflight("mmce", neutrinoPath, 0, NULL, -1) < 0) // D6 pre-teardown validation
             return;
-        int neutrinoDevMode = oplPath2Mode(neutrinoPath);
-        deinitEx(sbNeutrinoDeinitException(neutrinoPath), itemList->mode, neutrinoDevMode);
+        if (gAutoLaunchBDMGame == NULL) {
+            int neutrinoDevMode = oplPath2Mode(neutrinoPath);
+            deinitEx(sbNeutrinoDeinitException(neutrinoPath), itemList->mode, neutrinoDevMode);
+        } else {
+            // Autolaunch keeps the whole IOP as-is: the mmce mount Neutrino reads through stays up
+            miniDeinit(configSet);
+            free(gAutoLaunchBDMGame);
+            gAutoLaunchBDMGame = NULL;
+        }
         sysLaunchNeutrino("mmce", mmcePartname, mmceStartup, compatmask, EnablePS2Logo, neutrinoPath, neutrinoExtraArgs, neutrinoVideo, neutrinoGsmComp, 0 /* #11: mmce is fileid, no fs layer */, -1, &neutrinoVmc);
         return;
     }
@@ -1276,15 +1323,12 @@ void mmceLaunchGame(item_list_t *itemList, int id, config_set_t *configSet)
 
     if (gAutoLaunchBDMGame == NULL) {
         deinit(NO_EXCEPTION, MMCE_MODE); // CAREFUL: deinit will call mmceCleanUp, so mmceGames/game will be freed
-    }
-
-    /* No autolaunch yet
-    else {
+    } else {
         miniDeinit(configSet);
 
         free(gAutoLaunchBDMGame);
         gAutoLaunchBDMGame = NULL;
-    }*/
+    }
 
     settings->common.zso_cache = 0;
 
