@@ -4,7 +4,7 @@
 
 > **Unofficial fork** of [RiptOPL](https://github.com/NathanNeurotic/Open-PS2-Loader), modified by higorhgon to add
 > MMCE and SMB argv autolaunch (`opl.elf <ISO> <ID> <CD|DVD> mmce [slot]` / `smb`) for OSDMenu's games menu,
-> on the [`claude/osdmenu-games-menu-tkcbok`](https://github.com/higorhgon/Open-PS2-Loader/tree/claude/osdmenu-games-menu-tkcbok) branch.
+> on the [`feat/mmce-smb-autolaunch`](https://github.com/higorhgon/Open-PS2-Loader/tree/feat/mmce-smb-autolaunch) branch.
 > Not endorsed by the RiptOPL or Open PS2 Loader developers; report issues with these changes to this fork.
 > Licensed under the Academic Free License 3.0, see [LICENSE](LICENSE).
 
