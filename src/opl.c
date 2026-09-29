@@ -5061,6 +5061,14 @@ static void miniInit(int mode)
                 configGetInt(configOPL, CONFIG_OPL_BDM_CACHE, &bdmCacheSize);
             } else if (mode == HDD_MODE)
                 configGetInt(configOPL, CONFIG_OPL_HDD_CACHE, &hddCacheSize);
+            else if (mode == MMCE_MODE) {
+                // Same MMCE settings as _loadConfig. The slot is picked by autoLaunchMMCEGame
+                configGetStrCopy(configOPL, CONFIG_OPL_MMCE_PREFIX, gMMCEPrefix, sizeof(gMMCEPrefix));
+                configGetInt(configOPL, CONFIG_OPL_MMCEIGR_SLOT, &gMMCEIGRSlot);
+                configGetInt(configOPL, CONFIG_OPL_MMCE_GAMEID, &gMMCEEnableGameID);
+                configGetInt(configOPL, CONFIG_OPL_MMCE_WAIT_CYCLES, &gMMCEAckWaitCycles);
+                configGetInt(configOPL, CONFIG_OPL_MMCE_USE_ALARMS, &gMMCEUseAlarms);
+            }
         }
     }
 #ifdef __OPLDIAG
@@ -5391,6 +5399,84 @@ static void setBootDir(const char *bootPath)
     }
 }
 
+// argv autolaunch from MMCE, same arguments as "bdm" plus an optional MMCE slot:
+//   argv[1] file name (including extension), argv[2] game->startup, argv[3] "CD" / "DVD",
+//   argv[4] "mmce", argv[5] slot ("0" / "1", optional: both slots are searched when absent)
+// The ISO must be directly in mmce<slot>:/<MMCE prefix>CD/ or DVD/.
+static void autoLaunchMMCEGame(int argc, char *argv[])
+{
+    char path[256];
+    config_set_t *configSet;
+    const char *media;
+
+    miniInit(MMCE_MODE);
+
+    gAutoLaunchBDMGame = malloc(sizeof(base_game_info_t));
+    if (gAutoLaunchBDMGame == NULL) {
+        miniDeinit(NULL);
+        return;
+    }
+    memset(gAutoLaunchBDMGame, 0, sizeof(base_game_info_t));
+
+    // Same name validation as autoLaunchBDMGame: isValidIsoName leaves nameLen untouched on failure
+    int nameLen = 0;
+    int format = isValidIsoName(argv[1], &nameLen);
+    if (format <= 0 || nameLen < 0 || nameLen > ISO_GAME_NAME_MAX) {
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+        miniDeinit(NULL);
+        return;
+    }
+    if (format == GAME_FORMAT_OLD_ISO) {
+        strncpy(gAutoLaunchBDMGame->name, &argv[1][GAME_STARTUP_MAX], nameLen);
+        gAutoLaunchBDMGame->name[nameLen] = '\0';
+        strncpy(gAutoLaunchBDMGame->extension, &argv[1][GAME_STARTUP_MAX + nameLen], sizeof(gAutoLaunchBDMGame->extension));
+        gAutoLaunchBDMGame->extension[sizeof(gAutoLaunchBDMGame->extension) - 1] = '\0';
+    } else {
+        strncpy(gAutoLaunchBDMGame->name, argv[1], nameLen);
+        gAutoLaunchBDMGame->name[nameLen] = '\0';
+        strncpy(gAutoLaunchBDMGame->extension, &argv[1][nameLen], sizeof(gAutoLaunchBDMGame->extension));
+        gAutoLaunchBDMGame->extension[sizeof(gAutoLaunchBDMGame->extension) - 1] = '\0';
+    }
+
+    snprintf(gAutoLaunchBDMGame->startup, sizeof(gAutoLaunchBDMGame->startup), "%s", argv[2]);
+
+    if (strcasecmp("CD", argv[3]) == 0) {
+        gAutoLaunchBDMGame->media = SCECdPS2CD;
+        media = "CD";
+    } else {
+        gAutoLaunchBDMGame->media = SCECdPS2DVD;
+        media = "DVD";
+    }
+
+    gAutoLaunchBDMGame->format = format;
+    gAutoLaunchBDMGame->parts = 1; // ul not supported.
+
+    int slot = -1;
+    if ((argc >= 6) && ((argv[5][0] == '0') || (argv[5][0] == '1')))
+        slot = argv[5][0] - '0';
+
+    if (mmceAutoLaunchSetup(slot, media, argv[1]) != 0) {
+        LOG("MMCE autolaunch: %s not found\n", argv[1]);
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+        miniDeinit(NULL);
+        return;
+    }
+
+    snprintf(path, sizeof(path), "%sCFG/%s.cfg", mmceAutoLaunchPrefix(), gAutoLaunchBDMGame->startup);
+    configSet = configAlloc(0, NULL, path);
+    configRead(configSet);
+
+    // Only returns if the launch was refused; fall back to the menu like the BDM autolaunch does
+    mmceLaunchGame(NULL, -1, configSet);
+    if (gAutoLaunchBDMGame != NULL) {
+        miniDeinit(configSet);
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+    }
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef __DECI2_DEBUG
@@ -5437,6 +5523,14 @@ int main(int argc, char *argv[])
            argv[4] "bdm" */
         if (!strcmp(argv[4], "bdm"))
             autoLaunchBDMGame(argv);
+        /* argv[0] boot path
+           argv[1] file name (including extention)
+           argv[2] game->startup
+           argv[3] game->media ("CD" / "DVD")
+           argv[4] "mmce"
+           argv[5] MMCE slot ("0" / "1", optional) */
+        if (!strcmp(argv[4], "mmce"))
+            autoLaunchMMCEGame(argc, argv);
     }
 
     init();
