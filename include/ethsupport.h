@@ -26,6 +26,13 @@ int ethIsSMBShareConnected(void);
 // Explicit-loader helper: synchronously bring up SMB and open the configured share when no
 // incompatible NIC stack is resident. Used only for a user-entered custom ELF path.
 int ethEnsureSMBShareConnected(void);
+// Autolaunch (argv "smb" mode): connects to the configured share and checks that
+// <share>\<prefix>\<media>\<fileName> exists. Returns 0 when the ISO was found.
+int ethAutoLaunchSetup(const char *media, const char *fileName);
+// Autolaunch: the SMB prefix of the share ("smb0:<prefix>\"), valid after ethAutoLaunchSetup
+const char *ethAutoLaunchPrefix(void);
+// Autolaunch: launches gAutoLaunchBDMGame. Only returns if the launch was refused.
+void ethAutoLaunchGame(config_set_t *configSet);
 // Queue a full live SMB reconnect: close the current session, apply the current Network Settings
 // (link mode + IP/DHCP), log on/open the share again, and rebuild the list. Safe to call repeatedly;
 // one request is coalesced while the IO worker is reconnecting.
