@@ -3065,6 +3065,44 @@ static void emberSaveSettings(config_set_t *configOPL)
     configRemoveKey(configOPL, CONFIG_OPL_EMBER_DISPLAY); // migrated on load; never written again
 }
 
+// Network settings (conf_network.cfg), shared by _loadConfig and the SMB autolaunch
+static void readNetworkConfig(config_set_t *configNet)
+{
+    const char *temp;
+
+    configGetInt(configNet, CONFIG_NET_ETH_LINKM, &gETHOpMode);
+
+    configGetInt(configNet, CONFIG_NET_PS2_DHCP, &ps2_ip_use_dhcp);
+    configGetInt(configNet, CONFIG_NET_SMB_NBNS, &gPCShareAddressIsNetBIOS);
+    configGetStrCopy(configNet, CONFIG_NET_SMB_NB_ADDR, gPCShareNBAddress, sizeof(gPCShareNBAddress));
+
+    if (configGetStr(configNet, CONFIG_NET_SMB_IP_ADDR, &temp))
+        sscanf(temp, "%d.%d.%d.%d", &pc_ip[0], &pc_ip[1], &pc_ip[2], &pc_ip[3]);
+
+    configGetInt(configNet, CONFIG_NET_SMB_PORT, &gPCPort);
+
+    if (configGetStr(configNet, CONFIG_NET_HTTP_IP_ADDR, &temp))
+        sscanf(temp, "%d.%d.%d.%d", &gHttpServerIp[0], &gHttpServerIp[1], &gHttpServerIp[2], &gHttpServerIp[3]);
+    configGetInt(configNet, CONFIG_NET_HTTP_PORT, &gHttpPort);
+    configGetStrCopy(configNet, CONFIG_NET_HTTP_BASE_PATH, gHttpBasePath, sizeof(gHttpBasePath));
+    httpNormalizeBasePath(gHttpBasePath, sizeof(gHttpBasePath));
+
+    configGetStrCopy(configNet, CONFIG_NET_SMB_SHARE, gPCShareName, sizeof(gPCShareName));
+    configGetStrCopy(configNet, CONFIG_NET_SMB_USER, gPCUserName, sizeof(gPCUserName));
+    configGetStrCopy(configNet, CONFIG_NET_SMB_PASSW, gPCPassword, sizeof(gPCPassword));
+
+    if (configGetStr(configNet, CONFIG_NET_PS2_IP, &temp))
+        sscanf(temp, "%d.%d.%d.%d", &ps2_ip[0], &ps2_ip[1], &ps2_ip[2], &ps2_ip[3]);
+    if (configGetStr(configNet, CONFIG_NET_PS2_NETM, &temp))
+        sscanf(temp, "%d.%d.%d.%d", &ps2_netmask[0], &ps2_netmask[1], &ps2_netmask[2], &ps2_netmask[3]);
+    if (configGetStr(configNet, CONFIG_NET_PS2_GATEW, &temp))
+        sscanf(temp, "%d.%d.%d.%d", &ps2_gateway[0], &ps2_gateway[1], &ps2_gateway[2], &ps2_gateway[3]);
+    if (configGetStr(configNet, CONFIG_NET_PS2_DNS, &temp))
+        sscanf(temp, "%d.%d.%d.%d", &ps2_dns[0], &ps2_dns[1], &ps2_dns[2], &ps2_dns[3]);
+
+    configGetStrCopy(configNet, CONFIG_NET_NBD_DEFAULT_EXPORT, gExportName, sizeof(gExportName));
+}
+
 static void _loadConfig()
 {
     int value, themeID = -1, langID = -1;
@@ -3451,41 +3489,8 @@ static void _loadConfig()
             result = tryAlternateDevice(lscstatus);
         }
 
-        if (result & CONFIG_NETWORK) {
-            config_set_t *configNet = configGetByType(CONFIG_NETWORK);
-
-            configGetInt(configNet, CONFIG_NET_ETH_LINKM, &gETHOpMode);
-
-            configGetInt(configNet, CONFIG_NET_PS2_DHCP, &ps2_ip_use_dhcp);
-            configGetInt(configNet, CONFIG_NET_SMB_NBNS, &gPCShareAddressIsNetBIOS);
-            configGetStrCopy(configNet, CONFIG_NET_SMB_NB_ADDR, gPCShareNBAddress, sizeof(gPCShareNBAddress));
-
-            if (configGetStr(configNet, CONFIG_NET_SMB_IP_ADDR, &temp))
-                sscanf(temp, "%d.%d.%d.%d", &pc_ip[0], &pc_ip[1], &pc_ip[2], &pc_ip[3]);
-
-            configGetInt(configNet, CONFIG_NET_SMB_PORT, &gPCPort);
-
-            if (configGetStr(configNet, CONFIG_NET_HTTP_IP_ADDR, &temp))
-                sscanf(temp, "%d.%d.%d.%d", &gHttpServerIp[0], &gHttpServerIp[1], &gHttpServerIp[2], &gHttpServerIp[3]);
-            configGetInt(configNet, CONFIG_NET_HTTP_PORT, &gHttpPort);
-            configGetStrCopy(configNet, CONFIG_NET_HTTP_BASE_PATH, gHttpBasePath, sizeof(gHttpBasePath));
-            httpNormalizeBasePath(gHttpBasePath, sizeof(gHttpBasePath));
-
-            configGetStrCopy(configNet, CONFIG_NET_SMB_SHARE, gPCShareName, sizeof(gPCShareName));
-            configGetStrCopy(configNet, CONFIG_NET_SMB_USER, gPCUserName, sizeof(gPCUserName));
-            configGetStrCopy(configNet, CONFIG_NET_SMB_PASSW, gPCPassword, sizeof(gPCPassword));
-
-            if (configGetStr(configNet, CONFIG_NET_PS2_IP, &temp))
-                sscanf(temp, "%d.%d.%d.%d", &ps2_ip[0], &ps2_ip[1], &ps2_ip[2], &ps2_ip[3]);
-            if (configGetStr(configNet, CONFIG_NET_PS2_NETM, &temp))
-                sscanf(temp, "%d.%d.%d.%d", &ps2_netmask[0], &ps2_netmask[1], &ps2_netmask[2], &ps2_netmask[3]);
-            if (configGetStr(configNet, CONFIG_NET_PS2_GATEW, &temp))
-                sscanf(temp, "%d.%d.%d.%d", &ps2_gateway[0], &ps2_gateway[1], &ps2_gateway[2], &ps2_gateway[3]);
-            if (configGetStr(configNet, CONFIG_NET_PS2_DNS, &temp))
-                sscanf(temp, "%d.%d.%d.%d", &ps2_dns[0], &ps2_dns[1], &ps2_dns[2], &ps2_dns[3]);
-
-            configGetStrCopy(configNet, CONFIG_NET_NBD_DEFAULT_EXPORT, gExportName, sizeof(gExportName));
-        }
+        if (result & CONFIG_NETWORK)
+            readNetworkConfig(configGetByType(CONFIG_NETWORK));
     }
 
     // UDP transports bind their ministack to the saved STATIC PS2 IP fields and never consult DHCP.
@@ -5309,9 +5314,16 @@ static void miniInit(int mode)
                 configGetInt(configOPL, CONFIG_OPL_MMCE_GAMEID, &gMMCEEnableGameID);
                 configGetInt(configOPL, CONFIG_OPL_MMCE_WAIT_CYCLES, &gMMCEAckWaitCycles);
                 configGetInt(configOPL, CONFIG_OPL_MMCE_USE_ALARMS, &gMMCEUseAlarms);
+            } else if (mode == ETH_MODE) {
+                // Same SMB settings as _loadConfig
+                configGetStrCopy(configOPL, CONFIG_OPL_ETH_PREFIX, gETHPrefix, sizeof(gETHPrefix));
+                sanitizePrefix(gETHPrefix);
+                configGetInt(configOPL, CONFIG_OPL_SMB_CACHE, &smbCacheSize);
             }
         }
     }
+    if ((mode == ETH_MODE) && (ret & CONFIG_NETWORK))
+        readNetworkConfig(configGetByType(CONFIG_NETWORK));
 #ifdef __OPLDIAG
     // Autolaunch never initializes the GUI or a release TTY. Display the captured config state
     // using only the renderer and built-in font, then release them before the game handoff.
@@ -5587,6 +5599,85 @@ static void autoLaunchBDMGame(char *argv[])
     }
 }
 
+// argv autolaunch from an SMB share, same arguments as "bdm":
+//   argv[1] file name (including extension), argv[2] game->startup, argv[3] "CD" / "DVD", argv[4] "smb"
+// Uses the share from the network settings; the ISO must be directly in <share>\<ETH prefix>\CD\ or DVD\.
+static void autoLaunchSMBGame(char *argv[])
+{
+    char path[256];
+    config_set_t *configSet;
+    const char *media;
+
+    miniInit(ETH_MODE);
+
+    gAutoLaunchBDMGame = malloc(sizeof(base_game_info_t));
+    if (gAutoLaunchBDMGame == NULL) {
+        miniDeinit(NULL);
+        return;
+    }
+    memset(gAutoLaunchBDMGame, 0, sizeof(base_game_info_t));
+
+    // Same name validation as autoLaunchBDMGame: isValidIsoName leaves nameLen untouched on failure
+    int nameLen = 0;
+    int format = isValidIsoName(argv[1], &nameLen);
+    if (format <= 0 || nameLen < 0 || nameLen > ISO_GAME_NAME_MAX) {
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+        miniDeinit(NULL);
+        return;
+    }
+    if (format == GAME_FORMAT_OLD_ISO) {
+        strncpy(gAutoLaunchBDMGame->name, &argv[1][GAME_STARTUP_MAX], nameLen);
+        gAutoLaunchBDMGame->name[nameLen] = '\0';
+        strncpy(gAutoLaunchBDMGame->extension, &argv[1][GAME_STARTUP_MAX + nameLen], sizeof(gAutoLaunchBDMGame->extension));
+        gAutoLaunchBDMGame->extension[sizeof(gAutoLaunchBDMGame->extension) - 1] = '\0';
+    } else {
+        strncpy(gAutoLaunchBDMGame->name, argv[1], nameLen);
+        gAutoLaunchBDMGame->name[nameLen] = '\0';
+        strncpy(gAutoLaunchBDMGame->extension, &argv[1][nameLen], sizeof(gAutoLaunchBDMGame->extension));
+        gAutoLaunchBDMGame->extension[sizeof(gAutoLaunchBDMGame->extension) - 1] = '\0';
+    }
+
+    snprintf(gAutoLaunchBDMGame->startup, sizeof(gAutoLaunchBDMGame->startup), "%s", argv[2]);
+
+    if (strcasecmp("CD", argv[3]) == 0) {
+        gAutoLaunchBDMGame->media = SCECdPS2CD;
+        media = "CD";
+    } else {
+        gAutoLaunchBDMGame->media = SCECdPS2DVD;
+        media = "DVD";
+    }
+
+    gAutoLaunchBDMGame->format = format;
+    gAutoLaunchBDMGame->parts = 1; // ul not supported.
+
+    if (ethAutoLaunchSetup(media, argv[1]) != 0) {
+        LOG("SMB autolaunch: %s not found\n", argv[1]);
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+        ethDeinitModules();
+        miniDeinit(NULL);
+        return;
+    }
+
+    snprintf(path, sizeof(path), "%sCFG\\%s.cfg", ethAutoLaunchPrefix(), gAutoLaunchBDMGame->startup);
+    configSet = configAlloc(0, NULL, path);
+    configRead(configSet);
+    // A menu launch gets #Startup from sbPopulateConfig; this config came straight from the CFG file
+    if (configSet != NULL)
+        configSetStr(configSet, CONFIG_ITEM_STARTUP, gAutoLaunchBDMGame->startup);
+
+    // Only returns if the launch was refused; fall back to the menu like the BDM autolaunch does
+    ethAutoLaunchGame(configSet);
+    if (gAutoLaunchBDMGame != NULL) {
+        LOG("AUTOLAUNCH SMB launch refused; falling back to the menu\n");
+        ethDeinitModules();
+        miniDeinit(configSet);
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+    }
+}
+
 // --------------------- Main --------------------
 // Memory-card roots require an explicit slash for file creation (mc1:/FILE, not mc1:FILE).
 // Some launchers provide an equivalent compact path such as mc1:APPS/OPL.ELF or leave getcwd()
@@ -5772,6 +5863,13 @@ int main(int argc, char *argv[])
            argv[5] MMCE slot ("0" / "1", optional) */
         if (!strcmp(argv[4], "mmce"))
             autoLaunchMMCEGame(argc, argv);
+        /* argv[0] boot path
+           argv[1] file name (including extention)
+           argv[2] game->startup
+           argv[3] game->media ("CD" / "DVD")
+           argv[4] "smb" */
+        if (!strcmp(argv[4], "smb"))
+            autoLaunchSMBGame(argv);
     }
 
     init();

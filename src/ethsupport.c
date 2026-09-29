@@ -166,7 +166,10 @@ static void ethInitSMB(void)
     // connect
     ethSMBConnect();
 
-    if (gNetworkStartup == 0) {
+    if (gNetworkStartup == 0 && gAutoLaunchBDMGame != NULL) {
+        // Autolaunch (argv "smb" mode) has no GUI: skip the theme/language discovery below
+        sbCreateFolders(ethPrefix, 1);
+    } else if (gNetworkStartup == 0) {
         // update Themes
         char path[256];
         snprintf(path, sizeof(path), "%sTHM", ethPrefix);
@@ -718,7 +721,9 @@ static void ethLaunchGame(item_list_t *itemList, int id, config_set_t *configSet
     int EnablePS2Logo = 0;
     int result;
     char filename[32], partname[256];
-    base_game_info_t *game = ethGameForView(itemList, id);
+    // Autolaunch (argv "smb" mode, see autoLaunchSMBGame) reuses gAutoLaunchBDMGame and passes itemList == NULL
+    int autoLaunch = (gAutoLaunchBDMGame != NULL);
+    base_game_info_t *game = autoLaunch ? gAutoLaunchBDMGame : ethGameForView(itemList, id);
     struct cdvdman_settings_smb *settings;
 
     if (game == NULL)
@@ -728,7 +733,7 @@ static void ethLaunchGame(item_list_t *itemList, int id, config_set_t *configSet
 
     // PS1 view (SMB): the row carries its own core, so dispatch on the ROW, not on the view.
     // A .cue row is Ember's; anything else on this list is a POPSTARTER .VCD.
-    if (gPCShareName[0] && game != NULL && (ethGetItemView(itemList, id) == LIB_VIEW_PS1)) {
+    if (!autoLaunch && gPCShareName[0] && game != NULL && (ethGetItemView(itemList, id) == LIB_VIEW_PS1)) {
         if (cueIsCueEntry(game))
             ethLaunchCue(itemList, game->name, configSet);
         else
@@ -752,7 +757,8 @@ static void ethLaunchGame(item_list_t *itemList, int id, config_set_t *configSet
     // OPL core. Toast once at launch instead of leaving the setting looking honored. Pre-deinit,
     // so the toast renders; the launch then proceeds normally. Covers Favourites-origin launches
     // too (they delegate to this leg), which the compat-dialog lock in guigame.c cannot reach.
-    {
+    // Autolaunch has no GUI to show it on.
+    if (!autoLaunch) {
         int coreLoader = gDefaultCoreLoader;
         configGetInt(configSet, CONFIG_ITEM_CORE_LOADER, &coreLoader);
         if (coreLoader == 2)                 // "Default" sentinel: the dialog never persists it (index 2 removes the
@@ -785,7 +791,8 @@ static void ethLaunchGame(item_list_t *itemList, int id, config_set_t *configSet
             } else {
                 char error[256];
                 snprintf(error, sizeof(error), _l(_STR_ERR_VMC_CONTINUE), vmc_name, (vmc_id + 1));
-                if (!guiMsgBox(error, 1, NULL))
+                // Autolaunch has no GUI to ask on: continue without the VMC, like answering yes
+                if (!autoLaunch && !guiMsgBox(error, 1, NULL))
                     return;
             }
         }
@@ -897,7 +904,16 @@ static void ethLaunchGame(item_list_t *itemList, int id, config_set_t *configSet
     // MMCE cross-device game-id (#261): push the disc id to a present MMCE card before the SMB teardown
     // (self-probes mmce0/mmce1; no-ops if no card / feature off). Read `game` before deinit frees it.
     mmceSendGameID(game->startup, NULL, 0); // SMB has no Neutrino branch -> nothing to protect, no -mc args
-    deinit(NO_EXCEPTION, ETH_MODE);         // CAREFUL: deinit will call ethCleanUp, so ethGames/game will be freed
+    if (!autoLaunch)
+        deinit(NO_EXCEPTION, ETH_MODE); // CAREFUL: deinit will call ethCleanUp, so ethGames/game will be freed
+    else {
+        // The loader resets the IOP, but close the session so the server doesn't keep it around
+        ethSMBDisconnect();
+        ethDeinitModules();
+        miniDeinit(configSet);
+        free(gAutoLaunchBDMGame);
+        gAutoLaunchBDMGame = NULL;
+    }
 
     settings->common.fakemodule_flags |= FAKE_MODULE_FLAG_DEV9;
     settings->common.fakemodule_flags |= FAKE_MODULE_FLAG_SMAP;
@@ -906,6 +922,35 @@ static void ethLaunchGame(item_list_t *itemList, int id, config_set_t *configSet
     settings->common.zso_cache = smbCacheSize;
 
     sysLaunchLoaderElf(filename, "ETH_MODE", size_smb_cdvdman_irx, smb_cdvdman_irx, size_mcemu_irx, smb_mcemu_irx, EnablePS2Logo, compatmask);
+}
+
+int ethAutoLaunchSetup(const char *media, const char *fileName)
+{
+    char path[256];
+    int fd;
+
+    if (!ethEnsureSMBShareConnected()) {
+        LOG("SMB autolaunch: share not connected (%d)\n", gNetworkStartup);
+        return -1;
+    }
+
+    snprintf(path, sizeof(path), "%s%s\\%s", ethPrefix, media, fileName);
+    if ((fd = open(path, O_RDONLY, 0666)) < 0) {
+        LOG("SMB autolaunch: %s not found\n", path);
+        return -1;
+    }
+    close(fd);
+    return 0;
+}
+
+const char *ethAutoLaunchPrefix(void)
+{
+    return ethPrefix;
+}
+
+void ethAutoLaunchGame(config_set_t *configSet)
+{
+    ethLaunchGame(NULL, -1, configSet);
 }
 
 static config_set_t *ethGetConfig(item_list_t *itemList, int id)

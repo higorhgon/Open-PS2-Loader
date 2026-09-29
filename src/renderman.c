@@ -706,5 +706,8 @@ void rmSetOverscan(int overscan)
 
 unsigned char rmGetHsync(void)
 {
+    // Autolaunch waits for the network link before the renderer is initialized (vmode is still -1)
+    if (vmode < 0)
+        return 16;
     return rm_mode_table[vmode].hsync;
 }
