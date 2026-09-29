@@ -1,0 +1,170 @@
+name: Manual release
+
+# Builds the selected branch with the pinned toolchains and publishes it as a GitHub release.
+# Only runs when started by hand (Actions -> Manual release -> Run workflow), so a build is
+# only distributed when it has been chosen to be. It never touches the "rolling" release or
+# the v* tags used by rolling-release.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. osdmenu-2026.09.29). Must not exist yet, must not be 'rolling' or start with 'v'"
+        required: true
+        type: string
+      title:
+        description: "Release title (defaults to the tag)"
+        required: false
+        type: string
+      notes:
+        description: "Release notes (the commit list since the previous manual release is added below)"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        default: true
+        type: boolean
+      draft:
+        description: "Create as draft (publish it by hand from the Releases page)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
+jobs:
+  check-tag:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate the tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          # "rolling" and v* belong to rolling-release.yml
+          case "$TAG" in
+            rolling|v*|"") echo "::error::Tag '$TAG' is reserved for rolling-release.yml, pick another one"; exit 1 ;;
+          esac
+
+  build:
+    needs: [check-tag]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Same pinned toolchains as build-flavours.yml
+          - flavour: OFFICIALPINNED
+            image: ghcr.io/ps2homebrew/ps2homebrew@sha256:a1b1f87f09a88f64efbe11356aae47098d4d54b3b3a84f0609fa42369244e25d
+          - flavour: PS2DEVPINNED
+            image: ps2dev/ps2dev@sha256:8fba50ecc2229acd7f8da63d34302f12939b7d4fa6848dda1e6a0ce083321a11
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install host dependencies (either package manager)
+        run: |
+          if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache bash make git zip unzip tar gzip xz python3 py3-pip py3-yaml gmp mpfr4 mpc1 gawk coreutils findutils grep sed diffutils || true
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq bash make git zip unzip python3 python3-yaml gawk || true
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --prune --unshallow || true
+
+      - name: Install menu-coherent mmceman (#254)
+        run: sh .github/scripts/install_coherent_mmce.sh
+
+      - name: Compile (${{ matrix.flavour }})
+        run: make clean && make LOCALVERSION=${{ matrix.flavour }} OPLDIAG=0 RETROACHIEVEMENTS=0 release
+
+      - name: Record build manifest (${{ matrix.flavour }})
+        run: |
+          {
+            echo "flavour:      ${{ matrix.flavour }}"
+            echo "image:        ${{ matrix.image }}"
+            echo "built (UTC):  $(date -u '+%Y-%m-%d %H:%M:%S')"
+            echo "release tag:  ${{ inputs.tag }}"
+            echo "branch:       ${{ github.ref_name }}"
+            echo "commit:       ${{ github.sha }}"
+            (mips64r5900el-ps2-elf-gcc --version 2>/dev/null || echo "ee compiler: not probed") | head -1
+          } > BUILD-MANIFEST.txt
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: OPL-${{ matrix.flavour }}
+          path: |
+            RIPTOPL-*.ELF
+            OPNPS2LD-*.ELF
+            BUILD-MANIFEST.txt
+          if-no-files-found: error
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: OPL-*
+          path: artifacts
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          TITLE: ${{ inputs.title }}
+          NOTES: ${{ inputs.notes }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          set -e
+          if gh release view "$TAG" >/dev/null 2>&1 || git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag or release '$TAG' already exists, pick another tag"
+            exit 1
+          fi
+
+          # One zip per flavour: the ELF and its build manifest
+          mkdir -p assets
+          for dir in artifacts/OPL-*; do
+            flavour="${dir#artifacts/OPL-}"
+            (cd "$dir" && zip -r "$GITHUB_WORKSPACE/assets/RIPTOPL-$TAG-$flavour.zip" .)
+          done
+
+          # Notes: the given text, then the commits since the previous manual release
+          PREV=$(gh release list --limit 50 --json tagName,isDraft --jq '[.[] | select(.isDraft | not) | .tagName | select(. != "rolling" and (startswith("v") | not))][0] // ""')
+          {
+            [ -n "$NOTES" ] && printf '%s\n\n' "$NOTES"
+            echo "Built from \`${{ github.ref_name }}\` at ${{ github.sha }}."
+            echo
+            echo "**OFFICIALPINNED** is the recommended download; **PS2DEVPINNED** is built with the ps2dev toolchain for comparison."
+            echo
+            if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
+              echo "### Changes since $PREV"
+              git log --no-merges --format='- %s' "$PREV..HEAD"
+            else
+              echo "### Recent changes"
+              git log --no-merges --format='- %s' -20
+            fi
+          } > notes.md
+
+          FLAGS=""
+          [ "$PRERELEASE" = "true" ] && FLAGS="$FLAGS --prerelease"
+          [ "$DRAFT" = "true" ] && FLAGS="$FLAGS --draft"
+          # --latest=false: the "rolling" release stays the repository's Latest
+          gh release create "$TAG" assets/*.zip \
+            --target "${{ github.sha }}" \
+            --title "${TITLE:-$TAG}" \
+            --notes-file notes.md --latest=false $FLAGS
