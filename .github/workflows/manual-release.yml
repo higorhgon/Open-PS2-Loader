@@ -136,10 +136,11 @@ jobs:
             exit 1
           fi
 
-          # One zip per flavour: the ELF and its build manifest
+          # One zip per flavour: the ELF, its build manifest and the license
           mkdir -p assets
           for dir in artifacts/OPL-*; do
             flavour="${dir#artifacts/OPL-}"
+            cp LICENSE "$dir/LICENSE.txt"
             (cd "$dir" && zip -r "$GITHUB_WORKSPACE/assets/RIPTOPL-$TAG-$flavour.zip" .)
           done
 
@@ -150,6 +151,8 @@ jobs:
             echo "Built from \`${{ github.ref_name }}\` at ${{ github.sha }}."
             echo
             echo "**OFFICIALPINNED** is the recommended download; **PS2DEVPINNED** is built with the ps2dev toolchain for comparison."
+            echo
+            echo "Unofficial fork of [RiptOPL](https://github.com/NathanNeurotic/Open-PS2-Loader) with MMCE and SMB argv autolaunch, not endorsed by the RiptOPL or OPL developers. Licensed under the Academic Free License 3.0."
             echo
             if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
               echo "### Changes since $PREV"
