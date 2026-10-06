@@ -62,6 +62,10 @@ jobs:
             image: ghcr.io/ps2homebrew/ps2homebrew@sha256:a1b1f87f09a88f64efbe11356aae47098d4d54b3b3a84f0609fa42369244e25d
           - flavour: PS2DEVPINNED
             image: ps2dev/ps2dev@sha256:8fba50ecc2229acd7f8da63d34302f12939b7d4fa6848dda1e6a0ce083321a11
+          # The RetroAchievements build, with the same argv autolaunch (as build-flavours.yml builds RA)
+          - flavour: PS2DEVPINNED-RA
+            image: ps2dev/ps2dev@sha256:8fba50ecc2229acd7f8da63d34302f12939b7d4fa6848dda1e6a0ce083321a11
+            ra: "1"
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
     steps:
@@ -85,12 +89,13 @@ jobs:
         run: sh .github/scripts/install_coherent_mmce.sh
 
       - name: Compile (${{ matrix.flavour }})
-        run: make clean && make LOCALVERSION=${{ matrix.flavour }} OPLDIAG=0 RETROACHIEVEMENTS=0 release
+        run: make clean && make LOCALVERSION=${{ matrix.flavour }} OPLDIAG=0 RETROACHIEVEMENTS=${{ matrix.ra || '0' }} release
 
       - name: Record build manifest (${{ matrix.flavour }})
         run: |
           {
             echo "flavour:      ${{ matrix.flavour }}"
+            echo "retroachievements: ${{ matrix.ra || '0' }}"
             echo "image:        ${{ matrix.image }}"
             echo "built (UTC):  $(date -u '+%Y-%m-%d %H:%M:%S')"
             echo "release tag:  ${{ inputs.tag }}"
@@ -150,7 +155,7 @@ jobs:
             [ -n "$NOTES" ] && printf '%s\n\n' "$NOTES"
             echo "Built from \`${{ github.ref_name }}\` at ${{ github.sha }}."
             echo
-            echo "**OFFICIALPINNED** is the recommended download; **PS2DEVPINNED** is built with the ps2dev toolchain for comparison."
+            echo "**OFFICIALPINNED** is the recommended download; **PS2DEVPINNED** is built with the ps2dev toolchain for comparison, and **PS2DEVPINNED-RA** is the RetroAchievements build."
             echo
             echo "Unofficial fork of [RiptOPL](https://github.com/NathanNeurotic/Open-PS2-Loader) with MMCE and SMB argv autolaunch, not endorsed by the RiptOPL or OPL developers. Licensed under the Academic Free License 3.0."
             echo
